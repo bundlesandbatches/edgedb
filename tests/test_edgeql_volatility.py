@@ -34,35 +34,42 @@ class TestEdgeQLVolatility(tb.QueryTestCase):
     SETUP = os.path.join(os.path.dirname(__file__), 'schemas',
                          'volatility_setup.edgeql')
 
-    def _check_crossproduct(self, res):
+    def _check_crossproduct(self, res, *extra):
         ns = set()
         pairs = set()
         for row in res:
             ns.add(row[0])
+            ns.add(row[1])
             pairs.add((row[0], row[1]))
 
+        sextra = ''
+        if extra:
+            sextra = f" extra: {' '.join(str(e) for e in extra)}"
         self.assertEqual(
             pairs,
             {(n1, n2) for n1 in ns for n2 in ns},
+            f"values we got are: {res}{sextra}",
         )
 
-    def test_loop(self, n=None, *, single=False):
+    def test_loop(self, n=None, *, single=False, both=False):
+        hack = slice(None) if both else 0
+
         async def json_query(*args, **kwargs):
             q = self.con.query_single_json if single else self.con.query_json
             res = await q(*args, **kwargs)
-            return json.loads(res)
+            return (json.loads(res), res)[hack]
 
         async def native_query(*args, **kwargs):
             q = self.con.query_single if single else self.con.query
             res = await q(*args, **kwargs)
-            return serutils.serialize(res)
+            return (serutils.serialize(res), res)[hack]
 
         async def native_query_typenames(*args, **kwargs):
             res = await self.con._fetchall(*args, **kwargs, __typenames__=True)
             if single:
                 assert len(res) == 1
                 res = res[0]
-            return serutils.serialize(res)
+            return (serutils.serialize(res), ("types", res))[hack]
 
         qs = [json_query, native_query, native_query_typenames]
         if n is None:
@@ -569,14 +576,14 @@ class TestEdgeQLVolatility(tb.QueryTestCase):
         )
 
     async def test_edgeql_volatility_select_with_objects_01(self):
-        for query in self.test_loop(10):
-            res = await query("""
+        for query in self.test_loop(10, both=True):
+            res, rres = await query("""
                 WITH W := (SELECT Obj FILTER random() > 0.5),
                 SELECT ((SELECT W {n}), (SELECT W {n}))
             """)
 
             self._check_crossproduct(
-                [(row[0]['n'], row[1]['n']) for row in res])
+                [(row[0]['n'], row[1]['n']) for row in res], rres)
 
     async def test_edgeql_volatility_select_with_objects_02(self):
         for query in self.test_loop(10):
@@ -751,25 +758,25 @@ class TestEdgeQLVolatility(tb.QueryTestCase):
                 self.assertEqual(row[0], row[1])
 
     async def test_edgeql_volatility_select_hard_objects_02a(self):
-        for query in self.test_loop():
-            res = await query("""
+        for query in self.test_loop(both=True):
+            res, rres = await query("""
                 WITH O := (SELECT Obj {m := next()}),
                 SELECT ((SELECT O.m), (SELECT O.m));
             """)
 
             self.assertEqual(len(res), 9)
-            self._check_crossproduct(res)
+            self._check_crossproduct(res, rres)
 
     async def test_edgeql_volatility_select_hard_objects_02b(self):
-        for query in self.test_loop(10):
-            res = await query("""
+        for query in self.test_loop(10, both=True):
+            res, rres = await query("""
                 WITH O := (SELECT Obj {m := random()} FILTER .m > 0.3),
                 SELECT ((SELECT O.m), (SELECT O.m));
             """)
 
             for row in res:
                 self.assertGreater(row[0], 0.3)
-            self._check_crossproduct(res)
+            self._check_crossproduct(res, rres)
 
     async def test_edgeql_volatility_select_hard_objects_03(self):
         for query in self.test_loop():
@@ -785,14 +792,14 @@ class TestEdgeQLVolatility(tb.QueryTestCase):
     async def test_edgeql_volatility_select_hard_objects_04a(self):
         # TODO: this, but wrapped in DISTINCT
         # (which breaks the serialization, ugh!)
-        for query in self.test_loop():
-            res = await query("""
+        for query in self.test_loop(both=True):
+            res, rres = await query("""
                 WITH O := (SELECT Obj {m := next()}),
                 SELECT ((SELECT O {m}), (SELECT O {m}));
             """)
 
             self._check_crossproduct(
-                [(row[0]['m'], row[1]['m']) for row in res])
+                [(row[0]['m'], row[1]['m']) for row in res], rres)
 
     async def test_edgeql_volatility_select_hard_objects_04b(self):
         # TODO: this, but wrapped in DISTINCT
@@ -832,12 +839,15 @@ class TestEdgeQLVolatility(tb.QueryTestCase):
 
     async def test_edgeql_volatility_select_hard_objects_06(self):
         # now let's try it with a multi prop
-        res = await self.con.query("""
-            WITH O := (SELECT Obj {m := {next(), next()} })
-            SELECT ((SELECT O {m}), (SELECT O {m}));
-        """)
+        for query in self.test_loop(both=True):
+            res, rres = await query("""
+                WITH O := (SELECT Obj {m := {next(), next()} })
+                SELECT ((SELECT O {m}), (SELECT O {m}));
+            """)
 
-        self._check_crossproduct([(row[0].m, row[1].m) for row in res])
+            self._check_crossproduct(
+                [(frozenset(row[0]['m']), frozenset(row[1]['m']))
+                 for row in res], rres)
 
     async def test_edgeql_volatility_select_hard_objects_07(self):
         # now let's try it with a multi prop
