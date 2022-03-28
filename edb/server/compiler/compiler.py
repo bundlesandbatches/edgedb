@@ -1649,6 +1649,17 @@ class Compiler:
                 and query.has_dml
             ):
                 caps |= enums.Capability.MODIFICATIONS
+            txt = source.text() if source else ''
+            if (
+                all(s not in txt for s in ['sys::', 'schema::', 'cfg::'])
+                and query.sql
+            ):
+                assert query.sql[0]
+                s = ' '.join([
+                    "<<<<<", repr(txt), "-------",
+                    query.sql[0].decode('utf-8'), ">>>>>"
+                ])
+                print(s)
             return (query, caps)
 
     def _compile(
