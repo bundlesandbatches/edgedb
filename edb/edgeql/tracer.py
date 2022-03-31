@@ -488,6 +488,11 @@ def trace_Detached(
 
 
 @trace.register
+def trace_Global(node: qlast.GlobalExpr, *, ctx: TracerContext) -> None:
+    trace(node.name, ctx=ctx)
+
+
+@trace.register
 def trace_TypeCast(node: qlast.TypeCast, *, ctx: TracerContext) -> None:
     trace(node.expr, ctx=ctx)
     if isinstance(node.type, qlast.TypeName):
