@@ -160,6 +160,7 @@ cdef class DatabaseConnectionView:
 
         self._modaliases = DEFAULT_MODALIASES
         self._config = DEFAULT_CONFIG
+        self._globals = DEFAULT_CONFIG
         self._session_state_cache = None
 
         self._db_config_temp = None
@@ -179,6 +180,7 @@ cdef class DatabaseConnectionView:
         self._txid = None
         self._in_tx = False
         self._in_tx_config = None
+        self._in_tx_globals = None
         self._in_tx_db_config = None
         self._in_tx_modaliases = None
         self._in_tx_with_ddl = False
@@ -195,18 +197,20 @@ cdef class DatabaseConnectionView:
         self._in_tx_dbver = 0
         self._invalidate_local_cache()
 
-    cdef rollback_tx_to_savepoint(self, spid, modaliases, config):
+    cdef rollback_tx_to_savepoint(self, spid, modaliases, config, globals):
         self._tx_error = False
         # See also CompilerConnectionState.rollback_to_savepoint().
         self._txid = spid
         self.set_modaliases(modaliases)
         self.set_session_config(config)
+        self.set_globals(globals)
         self._invalidate_local_cache()
 
-    cdef recover_aliases_and_config(self, modaliases, config):
+    cdef recover_aliases_and_config(self, modaliases, config, globals):
         assert not self._in_tx
         self.set_modaliases(modaliases)
         self.set_session_config(config)
+        self.set_globals(globals)
 
     cdef abort_tx(self):
         if not self.in_tx():
@@ -219,11 +223,25 @@ cdef class DatabaseConnectionView:
         else:
             return self._config
 
+    cpdef get_globals(self):
+        if self._in_tx:
+            x = self._in_tx_globals
+        else:
+            x = self._globals
+        print("YO!!", x)
+        return x
+
     cdef set_session_config(self, new_conf):
         if self._in_tx:
             self._in_tx_config = new_conf
         else:
             self._config = new_conf
+
+    cdef set_globals(self, new_globals):
+        if self._in_tx:
+            self._in_tx_globals = new_globals
+        else:
+            self._globals = new_globals
 
     cdef get_database_config(self):
         if self._in_tx:
@@ -352,7 +370,11 @@ cdef class DatabaseConnectionView:
         if self._config:
             settings = config.get_settings()
             for sval in self._config.values():
-                setting = settings[sval.name]
+                try:
+                    setting = settings[sval.name]
+                except KeyError:
+                    # UHHHH OK THIS CAN NOT BE RIGHT
+                    continue
                 kind = 'B' if setting.backend_setting else 'C'
                 jval = config.value_to_json_value(setting, sval.value)
                 state.append({"name": sval.name, "value": jval, "type": kind})
@@ -544,8 +566,6 @@ cdef class DatabaseConnectionView:
         settings = config.get_settings()
 
         for op in ops:
-            setting = settings[op.setting_name]
-
             if op.scope is config.ConfigScope.INSTANCE:
                 await self._db._index.apply_system_config_op(conn, op)
             elif op.scope is config.ConfigScope.DATABASE:
@@ -555,6 +575,10 @@ cdef class DatabaseConnectionView:
             elif op.scope is config.ConfigScope.SESSION:
                 self.set_session_config(
                     op.apply(settings, self.get_session_config()),
+                )
+            elif op.scope is config.ConfigScope.GLOBAL:
+                self.set_globals(
+                    op.apply(settings, self.get_globals()),
                 )
 
     @staticmethod

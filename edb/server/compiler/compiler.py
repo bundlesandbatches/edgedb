@@ -1586,6 +1586,8 @@ class Compiler:
                 # op will be produced by the compiler as json.
                 config_op = None
 
+        elif ql.scope is qltypes.ConfigScope.GLOBAL:
+            config_op = None
         else:
             raise AssertionError(f'unexpected configuration scope: {ql.scope}')
 
@@ -1869,6 +1871,13 @@ class Compiler:
                         raise errors.QueryError(
                             'CONFIGURE INSTANCE cannot be executed in a '
                             'transaction block')
+
+                    unit.system_config = True
+                elif comp.config_scope is qltypes.ConfigScope.GLOBAL:
+                    if statements_len > 1:
+                        raise errors.QueryError(
+                            'SET GLOBAL cannot be executed in a multi-statement '
+                            'script???')
 
                     unit.system_config = True
                 elif comp.config_scope is qltypes.ConfigScope.DATABASE:

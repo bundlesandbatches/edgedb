@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 
+import base64
 import dataclasses
 import json
 from typing import *
@@ -72,11 +73,18 @@ class Operation(NamedTuple):
         try:
             return spec[self.setting_name]
         except KeyError:
-            raise errors.ConfigurationError(
-                f'unknown setting {self.setting_name!r}') from None
+            return None
+            # breakpoint()
+            # raise errors.ConfigurationError(
+            #     f'unknown setting {self.setting_name!r}') from None
 
     def coerce_value(self, setting: spec.Setting, *,
                      allow_missing: bool = False):
+        # XXX
+        if not setting:
+            assert isinstance(self.value, str)
+            return base64.b64decode(self.value)
+
         if issubclass(setting.type, types.ConfigType):
             try:
                 return setting.type.from_pyvalue(
@@ -125,7 +133,7 @@ class Operation(NamedTuple):
         value = self.coerce_value(setting, allow_missing=allow_missing)
 
         if self.opcode is OpCode.CONFIG_SET:
-            if issubclass(setting.type, types.ConfigType):
+            if setting and issubclass(setting.type, types.ConfigType):
                 raise errors.InternalServerError(
                     f'unexpected CONFIGURE SET on a non-primitive '
                     f'configuration parameter: {self.setting_name}'
@@ -134,7 +142,7 @@ class Operation(NamedTuple):
             storage = self._set_value(storage, value)
 
         elif self.opcode is OpCode.CONFIG_RESET:
-            if issubclass(setting.type, types.ConfigType):
+            if setting and issubclass(setting.type, types.ConfigType):
                 raise errors.InternalServerError(
                     f'unexpected CONFIGURE RESET on a non-primitive '
                     f'configuration parameter: {self.setting_name}'
@@ -206,6 +214,8 @@ class Operation(NamedTuple):
             source = 'database'
         elif self.scope is qltypes.ConfigScope.SESSION:
             source = 'session'
+        elif self.scope is qltypes.ConfigScope.GLOBAL:
+            source = 'global'
         else:
             raise AssertionError(f'unexpected config scope: {self.scope}')
 
