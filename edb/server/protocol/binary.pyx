@@ -1595,7 +1595,8 @@ cdef class EdgeConnection:
 
         query_unit = compiled.query_unit
         _dbview = self.get_dbview()
-        if _dbview.in_tx_error():
+        # XXX:
+        if _dbview.in_tx_error() or query_unit.tx_savepoint_rollback:
             if not (query_unit.tx_savepoint_rollback or query_unit.tx_rollback):
                 _dbview.raise_in_tx_error()
 
