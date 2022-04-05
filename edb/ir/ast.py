@@ -511,6 +511,9 @@ class Param:
     ir_type: TypeRef
     """IR type reference"""
 
+    global_name: typing.Optional[sn.QualName] = None
+    """If the parameter represents a global, the name of the global"""
+
 
 class MaterializeVolatile(Base):
     pass
@@ -550,6 +553,7 @@ class Statement(Command):
     expr: typing.Union[Set, Expr]
     views: typing.Dict[sn.Name, s_types.Type]
     params: typing.List[Param]
+    globals: typing.List[Param]
     cardinality: qltypes.Cardinality
     volatility: qltypes.Volatility
     multiplicity: typing.Optional[qltypes.Multiplicity]

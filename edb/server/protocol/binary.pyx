@@ -2238,12 +2238,15 @@ cdef class EdgeConnection:
                 f"invalid argument count, "
                 f"expected: {decl_args}, got: {recv_args}")
 
+        num_args = recv_args
         if query.first_extra is not None:
             assert recv_args == query.first_extra, \
                 f"argument count mismatch {recv_args} != {query.first_extra}"
-            out_buf.write_int16(<int16_t>(recv_args + query.extra_count))
-        else:
-            out_buf.write_int16(<int16_t>recv_args)
+            num_args += query.extra_count
+        if query.query_unit.globals:
+            num_args += len(query.query_unit.globals)
+
+        out_buf.write_int16(<int16_t>num_args)
 
         if query.query_unit.in_type_args:
             for param in query.query_unit.in_type_args:
@@ -2274,6 +2277,21 @@ cdef class EdgeConnection:
 
         if query.first_extra is not None:
             out_buf.write_bytes(query.extra_blob)
+
+        # Inject any globals variables into the argument stream.
+        # XXX: move elsewhere?
+        if query.query_unit.globals:
+            globs = self.get_dbview().get_globals()
+            for glob in query.query_unit.globals:
+                val = None
+                entry = globs.get(glob)
+                if entry:
+                    val = entry.value
+                if val:
+                    out_buf.write_int32(len(val))
+                    out_buf.write_bytes(val)
+                else:
+                    out_buf.write_int32(-1)
 
         # All columns are in binary format
         out_buf.write_int32(0x00010001)

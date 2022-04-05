@@ -21,6 +21,8 @@ from __future__ import annotations
 
 from typing import *
 
+import itertools
+
 from edb import errors
 
 from edb.common import debug
@@ -43,6 +45,36 @@ from . import dispatch
 from .context import OutputFormat as OutputFormat # NOQA
 
 
+# XXX: move elsewhere?
+def _populate_args(
+    ir_expr: irast.Statement,
+    use_named_params: bool = False,
+) -> Dict[str, pgast.Param]:
+    argmap: Dict[str, pgast.Param] = {}
+    if use_named_params:
+        return argmap  # ??
+    # XXX: can we eliminate the compile_Parameter nonsense?
+    next_argument = itertools.count(1)
+    for param in ir_expr.params:
+        if param.name.startswith('__edb_arg_'):
+            index = int(param.name[10:]) + 1
+        elif param.name.isdecimal():
+            index = int(param.name) + 1
+        else:
+            index = next(next_argument)
+        argmap[param.name] = pgast.Param(
+            index=index,
+            required=param.required,
+        )
+    for param in ir_expr.globals:
+        argmap[param.name] = pgast.Param(
+            index=len(argmap) + 1,
+            required=param.required,
+        )
+
+    return argmap
+
+
 def compile_ir_to_sql_tree(
     ir_expr: irast.Base,
     *,
@@ -63,11 +95,13 @@ def compile_ir_to_sql_tree(
         type_rewrites = {}
 
         singletons = []
+        argmap = {}
         if isinstance(ir_expr, irast.Statement):
             scope_tree = ir_expr.scope_tree
             query_params = list(ir_expr.params)
             type_rewrites = ir_expr.type_rewrites
             singletons = ir_expr.singletons
+            argmap = _populate_args(ir_expr, use_named_params)
             ir_expr = ir_expr.expr
         elif isinstance(ir_expr, irast.ConfigCommand):
             assert ir_expr.scope_tree
@@ -111,6 +145,7 @@ def compile_ir_to_sql_tree(
         ctx.expr_exposed = True
         for sing in singletons:
             ctx.path_scope[sing] = ctx.rel
+        ctx.argmap = argmap
         qtree = dispatch.compile(ir_expr, ctx=ctx)
         if isinstance(ir_expr, irast.Set) and not singleton_mode:
             assert isinstance(qtree, pgast.Query)

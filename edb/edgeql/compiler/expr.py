@@ -35,10 +35,14 @@ from edb.ir import typeutils as irtyputils
 
 from edb.schema import abc as s_abc
 from edb.schema import constraints as s_constr
+from edb.schema import functions as s_func
+from edb.schema import globals as s_globals
+from edb.schema import indexes as s_indexes
 from edb.schema import name as sn
 from edb.schema import objtypes as s_objtypes
 from edb.schema import scalars as s_scalars
 from edb.schema import types as s_types
+from edb.schema import utils as s_utils
 
 from edb.edgeql import ast as qlast
 
@@ -455,6 +459,55 @@ def compile_UnaryOp(
         pass
 
     return result
+
+
+@dispatch.compile.register(qlast.GlobalExpr)
+def compile_GlobalExpr(
+        expr: qlast.GlobalExpr, *, ctx: context.ContextLevel) -> irast.Set:
+    glob = ctx.env.get_track_schema_object(
+        s_utils.ast_ref_to_name(expr.name), expr.name,
+        modaliases=ctx.modaliases, type=s_globals.Global)
+    assert isinstance(glob, s_globals.Global)
+
+    assert not glob.is_computable(ctx.env.schema), "computable not implemented"
+    assert not glob.get_default(ctx.env.schema), "default not implemented"
+
+    if ctx.env.options.schema_object_context in (
+            s_constr.Constraint, s_indexes.Index):
+        # XXX: more specific
+        raise errors.SchemaDefinitionError(
+                f'global variables cannot be used here',
+                context=expr.context)
+    if ctx.env.options.func_params is not None:
+        raise errors.SchemaDefinitionError(
+                f'global variables not implemented in functions yet',
+                context=expr.context)
+
+    name = glob.get_name(ctx.env.schema)
+    if name not in ctx.env.query_globals:
+        param_name = f'__edb_global_{len(ctx.env.query_globals)}'
+
+        target = glob.get_target(ctx.env.schema)
+        assert target
+        target_typeref = typegen.type_to_typeref(target, env=ctx.env)
+
+        ctx.env.query_globals[name] = irast.Param(
+            name=param_name,
+            required=False,
+            schema_type=target,
+            ir_type=target_typeref,
+            global_name=name,
+        )
+
+    param = ctx.env.query_globals[name]
+    return setgen.ensure_set(
+        irast.Parameter(
+            name=param.name,
+            required=param.required,
+            typeref=param.ir_type,
+        ),
+        ctx=ctx,
+    )
 
 
 @dispatch.compile.register(qlast.TypeCast)

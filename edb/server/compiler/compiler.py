@@ -689,6 +689,12 @@ class Compiler:
                         array_type_id=array_tid,
                     )
 
+            globals = None
+            if ir.globals:
+                globals = [
+                    str(glob.global_name) for glob in ir.globals
+                    if glob.global_name]
+
             if ctx.protocol_version >= (0, 12):
                 in_type_data, in_type_id = \
                     sertypes.TypeSerializer.describe_params(
@@ -726,6 +732,7 @@ class Compiler:
                 sql=(sql_bytes,),
                 sql_hash=sql_hash,
                 cardinality=result_cardinality,
+                globals=globals,
                 in_type_id=in_type_id.bytes,
                 in_type_data=in_type_data,
                 in_type_args=in_type_args,
@@ -739,6 +746,10 @@ class Compiler:
             if ir.params:
                 raise errors.QueryError(
                     'EdgeQL script queries cannot accept parameters')
+
+            if ir.globals:
+                raise errors.QueryError(
+                    'EdgeQL script queries cannot use globals')
 
             return dbstate.SimpleQuery(
                 sql=(sql_bytes,),
@@ -1775,6 +1786,7 @@ class Compiler:
                     unit.in_type_data = comp.in_type_data
                     unit.in_type_args = comp.in_type_args
                     unit.in_type_id = comp.in_type_id
+                    unit.globals = comp.globals
 
                     unit.cacheable = comp.cacheable
 
